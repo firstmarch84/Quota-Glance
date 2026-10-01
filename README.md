@@ -6,7 +6,7 @@ Codex와 Claude의 남은 사용 한도를 한 창에서 확인하는 Windows �
 
 아래 문장을 **내 Windows PC에서 파일과 명령을 실행할 수 있는 Codex 또는 Claude**에 그대로 전달하세요.
 
-> https://github.com/firstmarch84/Quota-Glance 저장소의 README.md와 SETUP_FOR_AI.md를 읽고 내 Windows PC에 설치해줘. 기존 설치가 있으면 설정을 보존해 업데이트하고, 바탕화면 바로가기를 만들어줘. Codex와 Claude의 실제 사용량 수신을 각각 확인해줘. 로그인이나 Chrome 확장 설정처럼 내가 직접 해야 할 부분만 안내해줘. 아직 검증하지 못한 연결을 완료됐다고 보고하지 마.
+> https://github.com/firstmarch84/Quota-Glance 저장소의 README.md와 SETUP_FOR_AI.md를 읽고 내 Windows PC에 설치해줘. 기존 설치가 있으면 설정을 보존해 업데이트하고, 바탕화면 바로가기를 만들어줘. 내가 사용하는 서비스를 먼저 확인하고 Codex만, Claude만, 둘 다 중 맞게 설치해줘. 선택한 서비스의 실제 사용량 수신을 확인해줘. 로그인이나 Chrome 확장 설정처럼 내가 직접 해야 할 부분만 안내해줘. 아직 검증하지 못한 연결을 완료됐다고 보고하지 마.
 
 AI가 PC를 조작할 수 없는 채팅 환경이면 설치 안내만 받을 수 있습니다.
 
@@ -15,11 +15,11 @@ AI가 PC를 조작할 수 없는 채팅 환경이면 설치 안내만 받을 수
 | 항목 | 필요 조건 |
 | --- | --- |
 | PC | Windows 10/11, Python 3.11 이상(tkinter 포함) |
-| Codex | Codex CLI 설치 및 본인 ChatGPT 구독 계정 로그인 |
-| Claude | Chrome, 본인 Claude 계정, 이 저장소의 Chrome 확장 |
+| Codex 선택 시 | Codex CLI 설치 및 본인 ChatGPT 구독 계정 로그인 |
+| Claude 선택 시 | Chrome, 본인 Claude 계정, 이 저장소의 Chrome 확장 |
 | 회사 PC | Python·CLI·개발자 모드 확장 설치가 허용되어야 함 |
 
-첫 설치 때 Claude 확장 로드와 연결 코드 붙여넣기, 로그인은 한 번 필요합니다. **현재 버전은 코드 입력 없는 설치나 Chrome 없는 Claude 조회를 지원하지 않습니다.** 회사에서 확장 설치를 제한하면 IT 담당자에게 문의하세요.
+**Codex만 선택하면 Chrome·Claude 확장·연결 코드가 필요하지 않습니다.** Claude를 선택한 경우에만 첫 설치 때 확장 로드와 연결 코드 붙여넣기, 로그인이 한 번 필요합니다. **현재 버전은 코드 입력 없는 설치나 Chrome 없는 Claude 조회를 지원하지 않습니다.** 회사에서 확장 설치를 제한하면 IT 담당자에게 문의하세요.
 
 ## 설치 후 사용
 
@@ -56,3 +56,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 프로젝트 전용 Python 환경과 바탕화면 바로가기를 만듭니다. Python 자체와 Codex CLI, Chrome 확장은 자동 설치하지 않습니다. 상세 절차·업데이트·제거는 [SETUP_FOR_AI.md](SETUP_FOR_AI.md)를 참고하세요.
 
 문제 제보에는 Windows/Chrome/확장 버전, 증상, 민감정보를 가린 화면만 포함해주세요.
+
+## 필요한 서비스만 설치
+
+AI에게 “Codex만 설치해줘” 또는 “Claude만 설치해줘”라고 덧붙이세요.
+
+| 선택 | 설치 옵션 | 실행되는 기능 |
+| --- | --- | --- |
+| Codex만 | `-Providers codex` | Codex 카드만 표시. Claude 수신기와 Chrome 자동 실행 없음 |
+| Claude만 | `-Providers claude` | Claude 카드만 표시. Codex CLI 불필요 |
+| 둘 다 | `-Providers both` | 두 서비스 표시 |
+
+예: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Providers codex`
+
+다운로드한 소스에는 두 서비스 코드가 포함되어도, 선택하지 않은 서비스는 실행하지 않습니다. 나중에 변경하려면 앱을 트레이에서 종료한 뒤 다른 옵션으로 설치 스크립트를 다시 실행하세요. 옵션을 생략하면 기존 선택을 유지하고, 새 설치는 둘 다가 기본입니다.

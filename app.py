@@ -11,6 +11,7 @@ from datetime import datetime
 from core import Codex, DATA, ROOT
 from tray import Tray
 from bridge import ExtensionQuota
+from providers import create_adapters, selected
 import startup
 
 BG = '#10141e'
@@ -43,9 +44,9 @@ class App:
         self.top = tk.BooleanVar(value=self.settings.get('topmost',False))
         self.auto = tk.BooleanVar(value=startup.status()['enabled'])
         self.root.attributes('-topmost',self.top.get())
-        bridge = ExtensionQuota()
-        self.adapters = {'codex':Codex(), 'claude':bridge}
-        self.states = {key:{'rows':[],'updated':None,'error':'첫 사용량을 확인하고 있습니다'} for key,_,_,_ in ACCOUNTS}
+        self.accounts = [account for account in ACCOUNTS if account[0] in selected(self.settings)]
+        self.adapters = create_adapters(self.settings)
+        self.states = {key:{'rows':[],'updated':None,'error':'첫 사용량을 확인하고 있습니다'} for key,_,_,_ in self.accounts}
         self.widgets = {}
         self.build()
         self.tray = Tray(lambda action:self.events.put(('action',action)))
@@ -54,8 +55,9 @@ class App:
         self.root.after(300,self.refresh)
         self.root.after(60000,self.periodic)
         self.root.after(1000,self.tick)
-        self.root.after(5000,self.poll_extension)
-        if '--smoke' not in __import__('sys').argv:
+        if 'claude' in self.adapters:
+            self.root.after(5000,self.poll_extension)
+        if 'claude' in self.adapters and '--smoke' not in __import__('sys').argv:
             self.root.after(2000,self.wake_chrome)
         self.root.bind('<Control-r>',lambda e:self.refresh())
         if '--startup' in __import__('sys').argv:
@@ -65,7 +67,7 @@ class App:
             self.root.after(1500,self.hide)
         if '--smoke' in __import__('sys').argv:
             self.root.after(12000,self.smoke)
-        if '--connect-claude' in __import__('sys').argv:
+        if 'claude' in self.adapters and '--connect-claude' in __import__('sys').argv:
             self.root.after(1000,self.connection_help)
 
     def label(self,parent,text,size=10,color=TEXT,**kw):
@@ -83,7 +85,7 @@ class App:
         line.pack(fill='x',pady=(5,0))
         self.label(line,'AI 사용 한도',22).pack(side='left')
         self.button(line,'↻ 갱신',self.refresh).pack(side='right')
-        self.summary = self.label(head,'Codex와 Claude의 남은 여유를 한눈에',10,MUTED)
+        self.summary = self.label(head,' · '.join(a[1] for a in self.accounts)+' 잔여 한도',10,MUTED)
         self.summary.pack(anchor='w',pady=(6,10))
         toolbar = tk.Frame(self.root,bg=BG)
         toolbar.pack(fill='x',padx=18,pady=(0,10))
@@ -102,7 +104,7 @@ class App:
         content.bind('<Configure>',lambda e:self.canvas.configure(scrollregion=self.canvas.bbox('all')))
         self.canvas.bind('<Configure>',lambda e:self.canvas.itemconfigure(win,width=e.width))
         self.root.bind_all('<MouseWheel>',lambda e:self.canvas.yview_scroll(int(-e.delta/120),'units'))
-        for key,name,sub,color in ACCOUNTS:
+        for key,name,sub,color in self.accounts:
             card = tk.Frame(content,bg=CARD,padx=15,pady=12,highlightbackground='#2a3448',highlightthickness=1)
             card.pack(fill='x',padx=(20,10),pady=(0,10))
             header = tk.Frame(card,bg=CARD)
@@ -198,7 +200,8 @@ class App:
         self.set_text(self.widgets[key]['status'],text)
 
     def refresh(self):
-        self.adapters['claude'].request_refresh()
+        if 'claude' in self.adapters:
+            self.adapters['claude'].request_refresh()
         for key in self.adapters:
             self.refresh_one(key)
 
@@ -257,7 +260,7 @@ class App:
 
     def tick(self):
         count = sum(bool(s['rows']) and not s['error'] and time.time()-(s['updated'] or 0)<150 for s in self.states.values())
-        self.set_text(self.summary,f'{count} / {len(ACCOUNTS)} 계정 수치 확인 · 사용 한도 기준')
+        self.set_text(self.summary,f'{count} / {len(self.accounts)} 계정 수치 확인 · 사용 한도 기준')
         for key in self.states:
             if key not in self.busy:
                 self.status(key)
@@ -294,6 +297,14 @@ class App:
         self.root.focus_force()
 
     def help(self):
+        if 'claude' not in self.adapters:
+            messagebox.showinfo('사용 안내',
+                'Codex 전용 모드입니다. 앱만 실행하면 로그인된 Codex CLI로 조회합니다.\n'
+                'Chrome과 Claude 확장은 필요하지 않습니다.\n\n'
+                '다른 서비스를 추가하려면 앱을 종료하고 설치 스크립트를\n'
+                '-Providers both로 다시 실행하세요.\n'
+                '트레이 우클릭 → 종료로 완전히 종료합니다.',parent=self.root)
+            return
         messagebox.showinfo('사용 안내',
             '1. Quota Glance 앱을 켭니다.\n'
             '2. Claude 연결 설정에서 확장을 최초 한 번 연결하세요.\n'

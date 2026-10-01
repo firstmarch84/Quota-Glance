@@ -1,4 +1,4 @@
-param([string]$PythonPath, [switch]$NoLaunch, [switch]$NoShortcuts, [switch]$CheckOnly)
+param([string]$PythonPath, [ValidateSet('codex','claude','both')][string]$Providers, [switch]$NoLaunch, [switch]$NoShortcuts, [switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 $appRoot = $PSScriptRoot
 if (-not $PythonPath) {
@@ -30,11 +30,15 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check network/proxy settings.' }
 & $venvPython -c 'import tkinter, websocket; print(websocket.__version__)'
 if ($LASTEXITCODE -ne 0) { throw 'Runtime verification failed.' }
+if ($Providers) {
+    & $venvPython (Join-Path $appRoot 'providers.py') --providers $Providers
+    if ($LASTEXITCODE -ne 0) { throw 'Could not save provider selection; existing settings were preserved.' }
+}
 if (-not $NoShortcuts) {
     & (Join-Path $appRoot 'shortcut.ps1') -PythonPath $venvPython
     & (Join-Path $appRoot 'shortcut.ps1') -Desktop -PythonPath $venvPython
 }
-Write-Output 'Installation complete. Connect Codex CLI and the Claude Chrome extension as described in SETUP_FOR_AI.md.'
+Write-Output 'Installation complete. Connect only your selected services as described in SETUP_FOR_AI.md.'
 if (-not $NoLaunch) {
     Start-Process -FilePath (Join-Path $venvRoot 'Scripts\pythonw.exe') -ArgumentList ('"' + (Join-Path $appRoot 'launch.py') + '"') -WorkingDirectory $appRoot -WindowStyle Hidden
 }
