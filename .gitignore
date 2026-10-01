@@ -1,0 +1,9 @@
+__pycache__/
+.runtime/
+*.log
+output/
+*.lnk
+.env
+.env.*
+!.env.example
+.venv/

@@ -1,0 +1,11 @@
+const vm=require('node:vm');
+const fs=require('node:fs');
+const assert=require('node:assert/strict');
+const ctx=vm.createContext({URL});
+vm.runInContext(fs.readFileSync('extension/routing.js','utf8'),ctx);
+assert.equal(ctx.routeAccount({url:'https://claude.ai/settings/usage'}),'claude');
+assert.equal(ctx.routeAccount({url:'https://claude.ai/new#settings/usage'}),'claude');
+assert.equal(ctx.routeAccount({url:'https://claude.ai/new'}),null);
+assert.equal(ctx.routeAccount({url:'https://example.com/new#settings/usage'}),null);
+for(const url of ['https://gemini.google.com/app','https://example.com/settings/usage','https://claude.ai/login?returnTo=/settings/usage']) assert.equal(ctx.routeAccount({url}),null);
+console.log('7 routing checks passed');

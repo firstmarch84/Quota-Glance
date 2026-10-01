@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Quota Glance · Claude 연결",
+  "version": "1.4.0",
+  "minimum_chrome_version": "120",
+  "description": "로그인된 Claude 사용량 화면의 한도 숫자를 내 PC로 전달합니다.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "background"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://claude.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "routing.js",
+        "reader.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
