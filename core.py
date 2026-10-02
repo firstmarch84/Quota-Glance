@@ -153,7 +153,23 @@ EXTRACT = r'''(() => {
    const nearby = [...before,...after].find(s => /reset|초기화|재설정|갱신|첫.*시작/i.test(s) && !/^(제한 초기화|reset limits)$/i.test(s));
    rows.push({label, remaining: /remaining|left|남/i.test(direction) ? n : 100-n, resetText: nearby || ''});
  }
- return rows.slice(0,8);
+ const result = rows.slice(0,8);
+ // Only read the dedicated reset section, never infer coupons from reset times.
+ const start = lines.findIndex(s => /^(제한 초기화|사용 한도 초기화|Reset limits|Usage limit resets|Limit resets)$/i.test(s));
+ if (start >= 0 && result.length) {
+   const end = lines.findIndex((s,i) => i > start && /^(사용 크레딧|클라우드 세션 크레딧|Usage credits|Cloud session credits|Extra usage)$/i.test(s));
+   const resetLines = lines.slice(start+1,end < 0 ? undefined : end);
+   for (let i=0; i<resetLines.length && result.length<16; i++) {
+     if (!/^(전체 초기화|전체 재설정|5\s*시간 초기화|Full reset|Full resets|5[- ]hour reset|5[- ]hour resets)$/i.test(resetLines[i])) continue;
+     const details = [];
+     for (const s of resetLines.slice(i+1)) {
+       if (/^(전체 초기화|전체 재설정|5\s*시간 초기화|Full resets?|5[- ]hour resets?)$/i.test(s)) break;
+       if (/만료|expir|지금은 없습니다|새로 받으면|none available|no resets/i.test(s) && s.length <= 200) details.push(s);
+     }
+     if (details.length) result.push({kind:'resetCredit',label:resetLines[i],resetText:details.join(' · ').slice(0,200)});
+   }
+ }
+ return result;
 })()'''
 
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Quota Glance · Claude 연결",
-  "version": "1.4.0",
+  "name": "Quota Glance · 사용량 및 초기화권",
+  "version": "1.7.0",
   "minimum_chrome_version": "120",
-  "description": "로그인된 Claude 사용량 화면의 한도 숫자를 내 PC로 전달합니다.",
+  "description": "Claude 사용량과 Claude·Codex 초기화권을 표시하고 공식 사용 화면으로 연결합니다.",
   "permissions": [
     "storage",
     "alarms",
@@ -11,7 +11,8 @@
   ],
   "host_permissions": [
     "http://127.0.0.1/*",
-    "https://claude.ai/*"
+    "https://claude.ai/*",
+    "https://chatgpt.com/settings/usage*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -22,11 +23,13 @@
   "content_scripts": [
     {
       "matches": [
-        "https://claude.ai/*"
+        "https://claude.ai/*",
+        "https://chatgpt.com/settings/usage*"
       ],
       "js": [
         "routing.js",
         "reader.js",
+        "resets.js",
         "content.js"
       ],
       "run_at": "document_idle"

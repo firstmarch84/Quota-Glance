@@ -1,0 +1,64 @@
+const vm=require('node:vm'), fs=require('node:fs'), assert=require('node:assert/strict');
+let nodes={}, panels=[], scrolled=0, clicked=0;
+const context=vm.createContext({URL,location:{href:'https://chatgpt.com/settings/usage?tab=overview'},
+  getComputedStyle:()=>({visibility:'visible'}),setTimeout:()=>{},
+  document:{getElementById:id=>nodes[id],querySelectorAll:()=>panels}});
+for (const name of ['routing','resets']) vm.runInContext(fs.readFileSync(`extension/${name}.js`,'utf8'),context);
+const read=()=>JSON.parse(JSON.stringify(context.resetSnapshot()));
+assert.equal(context.resetAccount('https://chatgpt.com/c/123'),null);
+assert.equal(context.resetAccount('https://chatgpt.com.evil.test/settings/usage'),null);
+assert.equal(read(),null,'loading page is unknown, not zero');
+const button={innerText:'초기화 사용',disabled:false,getAttribute:name=>name==='aria-describedby'?'expiry':null,click:()=>clicked++};
+const row={innerText:'전체 재설정\n10월 5일 만료\n초기화 사용',querySelectorAll:()=>[button],style:{},scrollIntoView:()=>scrolled++};
+nodes={available:{innerText:'사용 가능 1'},expiry:{getAttribute:()=> '10. 5. 오후 1:21 GMT+9 만료'}};
+panels=[{getClientRects:()=>[{}],getAttribute:()=> 'available',children:[row]}];
+const item=read()[0];
+assert.equal(item.detail,'10. 5. 오후 1:21 GMT+9 만료');
+assert.equal(item.available,true);
+assert.equal(context.revealReset(item.identity).ok,true);
+assert.equal(scrolled,1);
+assert.equal(clicked,0,'reveal never activates a reset');
+button.disabled=true;
+assert.equal(read()[0].available,false);
+assert.equal(context.revealReset('changed').ok,false);
+panels[0].children=[row,row];
+assert.equal(context.revealReset(item.identity).ok,false,'ambiguous identity is rejected');
+nodes.available.innerText='내역';
+assert.equal(read(),null,'history is not available inventory');
+context.location.href='https://claude.ai/new#settings/usage';
+nodes={'resets-full':{innerText:'전체 초기화\n만료일: 10월 23일\n무료로 초기화',getClientRects:()=>[{}],querySelectorAll:()=>[{...button,innerText:'무료로 초기화'}]},
+  'resets-session':{innerText:'5시간 초기화\n지금은 없습니다. 새로 받으면 여기에 표시됩니다.',getClientRects:()=>[{}],querySelectorAll:()=>[]}};
+assert.equal(read().length,2);
+assert.equal(read()[1].available,false);
+assert.match(read()[1].detail,/지금은 없습니다/);
+console.log('Reset selection: routing, DOM inventory, disabled/history/unknown, identity and no consumption passed');
+
+(async()=>{
+ context.setTimeout=callback=>{callback();};
+ context.location.href='https://chatgpt.com/settings/usage';
+ nodes={available:{innerText:'사용 가능 1'},expiry:{getAttribute:()=> '10. 5. 오후 1:21 GMT+9 만료'}};
+ panels=[{getClientRects:()=>[{}],getAttribute:()=> 'available',children:[row]}];
+ let notice='';
+ context.document.querySelectorAll=selector=>selector==='[role="tabpanel"]'?panels:selector.includes('status')?[{getClientRects:()=>[{}],get innerText(){return notice;}}]:[];
+ button.disabled=false;
+ let before=clicked;
+ let result=await context.useReset(item.identity,'request1');
+ assert.equal(clicked,before+1);
+ assert.equal(result.ok,false,'a click alone does not prove success');
+ await context.useReset(item.identity,'request1');
+ assert.equal(clicked,before+1,'duplicate request cannot click twice');
+ button.disabled=true;
+ await context.useReset(item.identity,'request2');
+ assert.equal(clicked,before+1);
+ button.disabled=false;
+ notice='초기화가 실패했습니다';
+ result=await context.useReset(item.identity,'request3');
+ assert.equal(result.ok,false,'failure toast must not become success');
+ notice='';
+ button.click=()=>{clicked++;notice='초기화가 완료되었습니다';};
+ result=await context.useReset(item.identity,'request4');
+ assert.equal(result.ok,true);
+ result=await context.useReset(item.identity,'request5');
+ assert.equal(result.ok,false,'old success notices cannot confirm a new request');
+ console.log('Use action: disabled, duplicate, no false success, completion checks passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});

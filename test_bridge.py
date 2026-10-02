@@ -44,6 +44,18 @@ class BridgeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_rows([{'label':'session','remaining':value}])
 
+    def test_reset_credits_round_trip(self):
+        rows = [{'label':'session','remaining':98},
+                {'kind':'resetCredit','label':'전체 초기화','resetText':'만료일: 10월 23일'}]
+        with self.send({'rows':rows},self.bridge.token):
+            pass
+        self.assertEqual(self.bridge.fetch()[1],rows[1])
+
+    def test_invalid_reset_credit_rejected(self):
+        for detail in [None, '', 3, 'x'*201]:
+            with self.assertRaises(ValueError):
+                validate_rows([{'kind':'resetCredit','label':'전체 초기화','resetText':detail}])
+
     def test_pair_returns_auto_open_without_fabricating_usage(self):
         req = urllib.request.Request(f'http://127.0.0.1:{self.bridge.port}/pair',
             json.dumps({'version':'1.3.0'}).encode(),

@@ -15,13 +15,35 @@ PORT = 48721
 ACCOUNTS = ('claude',)
 
 
+def validate_credits(credits):
+    if not isinstance(credits, list) or len(credits) > 16:
+        raise ValueError('invalid credits')
+    result = []
+    for item in credits:
+        if not isinstance(item, dict) or type(item.get('available')) is not bool:
+            raise ValueError('invalid credit')
+        for field, maximum in [('label',120),('detail',200),('identity',500)]:
+            if not isinstance(item.get(field), str) or not 0 < len(item[field]) <= maximum:
+                raise ValueError('invalid credit field')
+        result.append({key:item[key] for key in ('label','detail','identity','available')})
+    return result
+
+
 def validate_rows(rows):
-    if not isinstance(rows, list) or len(rows) > 8:
+    if not isinstance(rows, list) or len(rows) > 16:
         raise ValueError('invalid rows')
     result = []
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError('invalid row')
+        if row.get('kind') == 'resetCredit':
+            label, detail = row.get('label'), row.get('resetText')
+            if not isinstance(label, str) or not 0 < len(label) <= 120:
+                raise ValueError('invalid label')
+            if not isinstance(detail, str) or not 0 < len(detail) <= 200:
+                raise ValueError('invalid reset credit')
+            result.append({'kind': 'resetCredit', 'label': label, 'resetText': detail})
+            continue
         value, label = row.get('remaining'), row.get('label')
         if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 100:
             raise ValueError('invalid percentage')
@@ -35,7 +57,7 @@ def validate_rows(rows):
 
 
 class ExtensionQuota:
-    def __init__(self, port=PORT):
+    def __init__(self, port=PORT, auto_open=True):
         token_path = DATA / 'bridge-key.txt'
         if not token_path.exists():
             token_path.write_text(secrets.token_urlsafe(32), encoding='ascii')
@@ -47,6 +69,11 @@ class ExtensionQuota:
         self.start_error = None
         self.paired_at = 0
         self.extension_version = None
+        self.auto_open = auto_open
+        self.credits = {}
+        self.reset_command = None
+        self.reset_result = None
+        self.reset_attempts = {}
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -70,11 +97,11 @@ class ExtensionQuota:
                 auth = self.headers.get('Authorization', '')
                 if not hmac.compare_digest(auth, 'Bearer ' + owner.token):
                     return self.reply(401)
-                if self.path not in ('/pair', '/quota'):
+                if self.path not in ('/pair', '/quota', '/credits', '/reset-result'):
                     return self.reply(404)
                 try:
                     size = int(self.headers.get('Content-Length', '0'))
-                    if not 0 < size <= 8192:
+                    if not 0 < size <= 32768:
                         return self.reply(413)
                     body = json.loads(self.rfile.read(size))
                     if not isinstance(body, dict):
@@ -92,7 +119,29 @@ class ExtensionQuota:
                             if body.get('problem') in problems:
                                 owner.error = problems[body['problem']]
                                 owner.channels['claude']['error'] = owner.error
-                        return self.reply(200, {'autoOpen': True})
+                            command = owner.reset_command if body.get('resetPoll') is True else None
+                            if command:
+                                owner.reset_command = None
+                            if command and time.time() - command.pop('created') > 60:
+                                command = None
+                        return self.reply(200, {'autoOpen': owner.auto_open, 'resetCommand': command})
+                    if self.path == '/credits':
+                        account = body.get('account')
+                        if account not in ('claude','codex'):
+                            raise ValueError('invalid account')
+                        credits = validate_credits(body.get('credits'))
+                        with owner.lock:
+                            tab_id = body.get('tabId')
+                            if tab_id is not None and (type(tab_id) is not int or tab_id<0):
+                                raise ValueError('invalid tab')
+                            owner.credits[account] = {'items':credits, 'received':time.time(), 'tabId':tab_id}
+                    if self.path == '/reset-result':
+                        message = body.get('message')
+                        if not isinstance(message,str) or len(message)>200 or type(body.get('ok')) is not bool:
+                            raise ValueError('invalid result')
+                        with owner.lock:
+                            if owner.reset_result and owner.reset_result['id'] == body.get('id'):
+                                owner.reset_result.update(done=True,ok=body['ok'],message=message)
                     if self.path == '/quota':
                         account = body.get('account', 'claude')
                         if account not in ACCOUNTS:
@@ -138,13 +187,49 @@ class ExtensionQuota:
     def request_refresh(self):
         pass  # The extension owns the one-minute page refresh cadence.
 
-    def connect(self, background=False):
+    def credit_snapshot(self, account):
+        with self.lock:
+            snapshot = self.credits.get(account, {'items':[], 'received':0})
+            return {'items':[dict(item) for item in snapshot['items']], 'received':snapshot['received']}
+
+    def reveal_credit(self, account, identity, consume=False):
+        with self.lock:
+            snapshot = self.credits.get(account)
+            if not snapshot or time.time()-snapshot['received'] > 90:
+                raise RuntimeError('초기화권 정보가 오래되었습니다. 사용량 화면을 열어 다시 확인하세요.')
+            matches = [item for item in snapshot['items'] if item['identity']==identity]
+            if len(matches)!=1:
+                raise RuntimeError('초기화권 목록이 변경되었습니다. 다시 선택하세요.')
+            if consume:
+                if not matches[0]['available']:
+                    raise RuntimeError('지금 사용할 수 없는 초기화권입니다.')
+                if snapshot.get('tabId') is None:
+                    raise RuntimeError('확장 1.7.0과 사용량 탭을 새로고침하세요.')
+                if time.time()-self.reset_attempts.get((account,identity),0)<120:
+                    raise RuntimeError('이미 사용을 요청한 초기화권입니다. 공식 사용량에서 결과를 확인하세요. 재시도는 2분 후 가능합니다.')
+            if self.reset_result and not self.reset_result['done'] and time.time()-self.reset_result['created'] < 60:
+                raise RuntimeError('이전 선택을 처리 중입니다. 잠시 기다려 주세요.')
+            request_id = secrets.token_hex(12)
+            self.reset_command = {'id':request_id,'action':'use' if consume else 'reveal','account':account,'identity':identity,'created':time.time(),'tabId':snapshot.get('tabId')}
+            if consume:
+                self.reset_attempts[(account,identity)] = time.time()
+            self.reset_result = {'id':request_id,'done':False,'created':time.time()}
+            return request_id
+
+    def credit_result(self, request_id):
+        with self.lock:
+            if self.reset_result and self.reset_result['id']==request_id:
+                return dict(self.reset_result)
+            return None
+
+    def connect(self, background=False, account='claude'):
         candidates = [pathlib.Path(os.environ.get(name, default)) / 'Google/Chrome/Application/chrome.exe'
                       for name, default in [('PROGRAMFILES', 'C:/Program Files'), ('LOCALAPPDATA', ''), ('PROGRAMFILES(X86)', 'C:/Program Files (x86)')]]
         chrome = next((path for path in candidates if path.is_file()), None)
         if not chrome:
             raise RuntimeError('Chrome 설치가 필요합니다')
-        args = [str(chrome), '--no-startup-window'] if background else [str(chrome), 'https://claude.ai/settings/usage']
+        urls = {'claude':'https://claude.ai/settings/usage','codex':'https://chatgpt.com/settings/usage?tab=overview'}
+        args = [str(chrome), '--no-startup-window'] if background else [str(chrome), urls[account]]
         subprocess.Popen(args, creationflags=0x08000000 if os.name == 'nt' else 0)
 
     def close(self):

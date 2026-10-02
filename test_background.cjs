@@ -81,5 +81,32 @@ async function setup({existing=false, tracked=false, available=true, valid=true,
   t.session.protectedTab = {id:7,autoDiscardable:true};
   await t.ctx.syncUsage();
   assert.equal(t.count.updates[0].autoDiscardable,true,'original memory behavior restored when app is closed');
+  t = await setup({existing:true});
+  let revealCalls=0, resultBody;
+  t.ctx.chrome.windows.update=async()=>{};
+  t.ctx.chrome.tabs.sendMessage=async(id,message)=>{
+    assert.equal(message.type,'revealReset');
+    assert.equal(message.identity,'chosen-expiry');
+    revealCalls++;
+    return {ok:true};
+  };
+  t.ctx.fetch=async(url,options)=>{resultBody=JSON.parse(options.body);return {ok:true,json:async()=>({})};};
+  await t.ctx.handleResetCommand({id:'one',account:'claude',action:'reveal',identity:'chosen-expiry'},'key');
+  assert.equal(revealCalls,1);
+  assert.equal(resultBody.ok,true);
+  assert.match(resultBody.message,/표시했습니다/);
+  await t.ctx.handleResetCommand({id:'two',account:'claude',action:'consume',identity:'chosen-expiry'},'key');
+  assert.equal(revealCalls,1,'consumption commands are not supported');
+  let useCalls=0;
+  t.ctx.chrome.tabs.sendMessage=async(id,message)=>{
+    assert.equal(id,7);
+    assert.equal(message.type,'useReset');
+    useCalls++;
+    return {ok:false,error:'결과 미확인'};
+  };
+  await t.ctx.handleResetCommand({id:'use-one',account:'claude',action:'use',identity:'chosen-expiry',tabId:7},'key');
+  await t.ctx.handleResetCommand({id:'use-one',account:'claude',action:'use',identity:'chosen-expiry',tabId:7},'key');
+  assert.equal(useCalls,1,'persisted request id prevents duplicate execution');
+  assert.equal(resultBody.ok,false,'uncertain result is never reported successful');
   console.log('12 background lifecycle scenarios passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

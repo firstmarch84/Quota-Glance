@@ -9,3 +9,4 @@ document.getElementById('pair').addEventListener('click',async () => {
   } catch { status.textContent='앱을 실행한 뒤 다시 연결해 주세요.'; }
 });
 document.getElementById('usage').addEventListener('click',() => chrome.tabs.create({url:'https://claude.ai/settings/usage'}));
+document.getElementById('codex-usage').addEventListener('click',() => chrome.tabs.create({url:'https://chatgpt.com/settings/usage?tab=overview'}));

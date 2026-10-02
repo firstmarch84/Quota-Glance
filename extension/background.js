@@ -1,4 +1,5 @@
 importScripts('routing.js');
+importScripts('resets.js');
 const ENDPOINT = 'http://127.0.0.1:48721';
 async function deliver(path, body, key) {
   const response = await fetch(ENDPOINT + path, {
@@ -14,12 +15,18 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     if (message.type==='pair' && !sender.tab) {
       const next = String(message.key||'').trim();
       if (!/^[\w-]{40,60}$/.test(next)) throw new Error('앱에서 복사한 연결 코드를 붙여 넣으세요.');
-      await deliver('/pair',{version:chrome.runtime.getManifest().version},next);
+      const paired = await deliver('/pair',{version:chrome.runtime.getManifest().version},next);
       await chrome.storage.local.set({key:next});
-      await ensureUsageTab();
+      if (paired.autoOpen) await ensureUsageTab();
       return reply({ok:true});
     }
     if (!sender.tab || !key) return reply({ok:false,error:'앱 연결을 먼저 완료하세요.'});
+    if (message.type==='resetSample') {
+      const account = resetAccount(sender.url);
+      if (!account || !Array.isArray(message.credits)) return reply({ok:false});
+      await deliver('/credits',{account,credits:message.credits,tabId:sender.tab.id},key);
+      return reply({ok:true});
+    }
     if (message.type==='sample') {
       const account = routeAccount(sender);
       if (!account) return reply({ok:false});
@@ -88,8 +95,10 @@ async function runSync(refresh) {
     ({key} = await chrome.storage.local.get('key'));
     if (!key) return;
     let state;
-    try { state = await deliver('/pair',{version:chrome.runtime.getManifest().version},key); }
+    try { state = await deliver('/pair',{version:chrome.runtime.getManifest().version,resetPoll:true},key); }
     catch { await releaseTab(); return; }
+    if (state.resetCommand) await handleResetCommand(state.resetCommand,key);
+    await readResetTabs(key);
     if (!state.autoOpen) return;
     const tab = await ensureUsageTab();
     if (!tab || !usageURL(tab.url)) { await releaseTab(); return; }
@@ -128,6 +137,38 @@ async function runSync(refresh) {
 }
 async function reportProblem(key, problem) {
   await deliver('/pair',{version:chrome.runtime.getManifest().version,problem},key);
+}
+async function readResetTabs(key) {
+  const tabs = await chrome.tabs.query({url:['https://chatgpt.com/settings/usage*','https://claude.ai/*']});
+  for (const tab of tabs.filter(t=>resetAccount(t.url))) {
+    try {
+      const result = await chrome.tabs.sendMessage(tab.id,{type:'resetSnapshot'});
+      if (Array.isArray(result?.credits)) await deliver('/credits',{account:resetAccount(tab.url),credits:result.credits,tabId:tab.id},key);
+    } catch {} // Old content script: the app shows missing/stale reset data.
+  }
+}
+async function handleResetCommand(command,key) {
+  const urls = {codex:'https://chatgpt.com/settings/usage?tab=overview',claude:'https://claude.ai/settings/usage'};
+  if (!urls[command.account] || !['reveal','use'].includes(command.action)) return;
+  try {
+    const tabs = await chrome.tabs.query({url:command.account==='codex'?'https://chatgpt.com/settings/usage*':'https://claude.ai/*'});
+    const tab = tabs.find(t=>resetAccount(t.url)===command.account && (command.tabId == null || t.id===command.tabId));
+    if (!tab) {
+      await chrome.tabs.create({url:urls[command.account],active:true});
+      throw new Error('사용량 화면을 열었습니다. 로딩 후 앱 목록에서 다시 선택하세요.');
+    }
+    if (command.action==='reveal') {
+      await chrome.windows.update(tab.windowId,{focused:true,state:'normal'});
+      await chrome.tabs.update(tab.id,{active:true});
+    }
+    const {resetRequestIds=[]} = await chrome.storage.session.get('resetRequestIds');
+    if (resetRequestIds.includes(command.id)) return;
+    await chrome.storage.session.set({resetRequestIds:[...resetRequestIds.slice(-99),command.id]});
+    const result = await chrome.tabs.sendMessage(tab.id,{type:command.action==='use'?'useReset':'revealReset',identity:command.identity,id:command.id});
+    await deliver('/reset-result',{id:command.id,ok:result?.ok===true,message:result?.ok?(result.message||'선택한 초기화권을 표시했습니다.'):result?.error||'사용량 탭을 새로고침하세요.'},key);
+  } catch (error) {
+    await deliver('/reset-result',{id:command.id,ok:false,message:String(error.message).slice(0,200)},key);
+  }
 }
 ensureAlarm();
 chrome.alarms.onAlarm.addListener(async alarm => {
